@@ -1,0 +1,8 @@
+[package]
+name = "druidgo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+druid = { git = "https://github.com/linebender/druid.git" }
+enum-map = "2.4.1"
