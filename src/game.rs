@@ -2,7 +2,7 @@ use druid::{Data, Lens};
 use enum_map::{Enum, EnumMap};
 use std::ops::Neg;
 
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug, Data, Copy, PartialEq)]
 pub struct Pos(pub i32, pub i32);
 
 impl Pos {
@@ -17,6 +17,26 @@ impl Pos {
         .filter(|&p| p.0 >= 0 && p.0 < (size as i32) && p.1 >= 0 && p.1 < (size as i32))
         .map(|p| *p)
         .collect()
+    }
+
+    pub fn valid(&self, size: usize) -> bool {
+        self.0 >= 0 && self.0 < (size as i32) && self.1 >= 0 && self.1 < (size as i32)
+    }
+
+    pub fn and_valid(&self, size: usize) -> Option<Pos> {
+        if self.valid(size) {
+            Some(*self)
+        } else {
+            None
+        }
+    }
+
+    pub fn index(&self, size: usize) -> Option<usize> {
+        if self.valid(size) {
+            Some((self.1 as usize) * size + (self.0 as usize))
+        } else {
+            None
+        }
     }
 }
 
@@ -110,41 +130,46 @@ impl Game {
         if let Some((color, structure)) = self.is_surrounded(p) {
             let num_captures = structure.len();
             for p in structure {
-                self.state.board[(p.1 as usize) * self.size + (p.0 as usize)] = None;
+                if let Some(i) = p.index(self.size) {
+                    self.state.board[i] = None;
+                }
             }
             self.state.captures[color] += num_captures;
         }
     }
 
     pub fn try_place_stone(&mut self, p: Pos) {
-        if self.has_stone_at(p) {
-            return;
-        }
-
-        self.history.push(self.state.clone());
-
-        self.state.board[(p.1 as usize) * self.size + (p.0 as usize)] = Some(self.turn);
-        for np in p.neighbors(self.size) {
-            if self.stone_at(np) == Some(-self.turn) {
-                self.remove_if_surrounded(np);
+        if let Some(i) = p.index(self.size) {
+            if self.has_stone_at(p) {
+                return;
             }
-        }
-        self.remove_if_surrounded(p);
 
-        // ko rule
-        let len = self.history.len();
-        if len >= 2
-            && self.history.get(len - 2).map(|s| s.board.clone()) == Some(self.state.board.clone())
-        {
-            self.state = self.history.pop().unwrap();
-            return;
-        }
+            self.history.push(self.state.clone());
 
-        self.turn = -self.turn;
+            self.state.board[i] = Some(self.turn);
+            for np in p.neighbors(self.size) {
+                if self.stone_at(np) == Some(-self.turn) {
+                    self.remove_if_surrounded(np);
+                }
+            }
+            self.remove_if_surrounded(p);
+
+            // ko rule
+            let len = self.history.len();
+            if len >= 2
+                && self.history.get(len - 2).map(|s| s.board.clone())
+                    == Some(self.state.board.clone())
+            {
+                self.state = self.history.pop().unwrap();
+                return;
+            }
+
+            self.turn = -self.turn;
+        }
     }
 
     pub fn stone_at(&self, p: Pos) -> Option<Stone> {
-        self.state.board[(p.1 as usize) * self.size + (p.0 as usize)]
+        p.index(self.size).and_then(|i| self.state.board[i])
     }
 
     pub fn has_stone_at(&self, p: Pos) -> bool {
