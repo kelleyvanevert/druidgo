@@ -11,15 +11,45 @@ use druid::kurbo::{Circle, Line};
 use druid::piet::{LineCap, LineJoin, StrokeStyle};
 use druid::widget::{CrossAxisAlignment, Flex, MainAxisAlignment};
 use druid::{
-    AppLauncher, Color, Data, Event, Lens, LifeCycle, MouseButton, PlatformError, Rect,
-    RenderContext, Size, Widget, WidgetExt, WindowDesc,
+    AppLauncher, Color, Data, Event, Lens, MouseButton, PlatformError, Point, RenderContext,
+    Widget, WidgetExt, WindowDesc,
 };
 use game::Stone;
 
 #[derive(Clone, Data, Lens)]
 struct ViewModel {
+    padding: f64,
     game: Game,
     hover: Option<Pos>,
+}
+
+impl ViewModel {
+    fn project(&self, widget_size: f64, pos: Pos) -> Point {
+        let board_size = widget_size - 2.0 * self.padding;
+        let stone_size = board_size / (self.game.size as f64);
+        Point {
+            x: self.padding + (pos.0 as f64 + 0.5) * stone_size,
+            y: self.padding + (pos.1 as f64 + 0.5) * stone_size,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn valid_project(&self, widget_size: f64, pos: Pos) -> Option<Point> {
+        pos.and_valid(self.game.size)
+            .map(|p| self.project(widget_size, p))
+    }
+
+    fn unproject(&self, widget_size: f64, pt: Point) -> Pos {
+        let board_size = widget_size - 2.0 * self.padding;
+        Pos(
+            ((pt.x - self.padding) / board_size * (self.game.size as f64)).floor() as i32,
+            ((pt.y - self.padding) / board_size * (self.game.size as f64)).floor() as i32,
+        )
+    }
+
+    fn unproject_valid(&self, widget_size: f64, pt: Point) -> Option<Pos> {
+        self.unproject(widget_size, pt).and_valid(self.game.size)
+    }
 }
 
 struct GoBoardWidget {}
@@ -40,21 +70,15 @@ impl Widget<ViewModel> for GoBoardWidget {
     ) {
         match event {
             Event::MouseMove(e) => {
-                let Size { width, height } = ctx.size();
-                let pos = Pos(
-                    (e.pos.x / width * (model.game.size as f64)).floor() as i32,
-                    (e.pos.y / height * (model.game.size as f64)).floor() as i32,
-                );
-                model.hover = pos.and_valid(model.game.size);
+                model.hover = model.unproject_valid(ctx.size().width, e.pos);
                 ctx.request_paint();
             }
             Event::MouseDown(e) => {
                 if e.button == MouseButton::Left {
-                    let Size { width, height } = ctx.size();
-                    let x = (e.pos.x / width * (model.game.size as f64)).floor() as i32;
-                    let y = (e.pos.y / height * (model.game.size as f64)).floor() as i32;
-                    model.game.try_place_stone(Pos(x, y));
-                    ctx.request_paint();
+                    if let Some(pos) = model.unproject_valid(ctx.size().width, e.pos) {
+                        model.game.try_place_stone(pos);
+                        ctx.request_paint();
+                    }
                 }
             }
             _ => {}
@@ -91,26 +115,19 @@ impl Widget<ViewModel> for GoBoardWidget {
 
     fn paint(&mut self, ctx: &mut druid::PaintCtx, model: &ViewModel, _env: &druid::Env) {
         let ViewModel { game, .. } = model;
-        let board_size = ctx.size().width;
+        let widget_size = ctx.size().width;
+        let board_size = widget_size - 2.0 * model.padding;
         let stone_size = board_size / (game.size as f64);
         let line_stroke_style = StrokeStyle::new()
             .line_cap(LineCap::Round)
             .line_join(LineJoin::Round);
 
-        // ctx.fill(
-        //     Rect::new(0.0, 0.0, board_size, board_size),
-        //     &Color::rgb(0.9, 0.9, 0.9),
-        // );
-
         for x in 0..game.size {
             for y in 0..game.size {
                 ctx.stroke_styled(
                     Line::new(
-                        ((x as f64 + 0.5) * stone_size, 0.5 * stone_size),
-                        (
-                            (x as f64 + 0.5) * stone_size,
-                            (game.size as f64 - 0.5) * stone_size,
-                        ),
+                        model.project(widget_size, (x, 0).into()),
+                        model.project(widget_size, (x, game.size - 1).into()),
                     ),
                     &Color::BLACK,
                     board_size / 500.0,
@@ -118,11 +135,8 @@ impl Widget<ViewModel> for GoBoardWidget {
                 );
                 ctx.stroke_styled(
                     Line::new(
-                        (0.5 * stone_size, (y as f64 + 0.5) * stone_size),
-                        (
-                            (game.size as f64 - 0.5) * stone_size,
-                            (y as f64 + 0.5) * stone_size,
-                        ),
+                        model.project(widget_size, (0, y).into()),
+                        model.project(widget_size, (game.size - 1, y).into()),
                     ),
                     &Color::BLACK,
                     board_size / 500.0,
@@ -131,13 +145,14 @@ impl Widget<ViewModel> for GoBoardWidget {
             }
         }
 
+        let stone_stroke_width = board_size / 250.0;
         for x in 0..game.size {
             for y in 0..game.size {
                 match game.stone_at(Pos(x as i32, y as i32)) {
                     Some(color) => {
                         let shape = Circle::new(
-                            ((x as f64 + 0.5) * stone_size, (y as f64 + 0.5) * stone_size),
-                            stone_size / 2.0,
+                            model.project(widget_size, (x, y).into()),
+                            stone_size / 2.0 - stone_stroke_width / 3.0,
                         );
                         ctx.fill(
                             shape,
@@ -149,7 +164,7 @@ impl Widget<ViewModel> for GoBoardWidget {
                         ctx.stroke_styled(
                             shape,
                             &Color::BLACK,
-                            board_size / 250.0,
+                            stone_stroke_width,
                             &line_stroke_style,
                         );
                     }
@@ -159,13 +174,11 @@ impl Widget<ViewModel> for GoBoardWidget {
         }
 
         if let Some(p) = model.hover {
+            let scale = 1.15;
             if !game.has_stone_at(p) {
                 let shape = Circle::new(
-                    (
-                        (p.0 as f64 + 0.5) * stone_size,
-                        (p.1 as f64 + 0.5) * stone_size,
-                    ),
-                    stone_size / 2.0 * 1.1,
+                    model.project(widget_size, p),
+                    stone_size / 2.0 * scale - stone_stroke_width / 3.0,
                 );
                 ctx.fill(
                     shape,
@@ -177,7 +190,7 @@ impl Widget<ViewModel> for GoBoardWidget {
                 ctx.stroke_styled(
                     shape,
                     &Color::BLACK,
-                    board_size / 250.0 * 1.1,
+                    stone_stroke_width * scale,
                     &line_stroke_style,
                 );
             }
@@ -192,7 +205,6 @@ fn build_calc() -> impl Widget<ViewModel> {
         .with_flex_child(board, 1.)
         .cross_axis_alignment(CrossAxisAlignment::Center)
         .main_axis_alignment(MainAxisAlignment::Center)
-        .padding(24.0)
         .background(Color::WHITE)
 }
 
@@ -205,6 +217,7 @@ pub fn main() -> Result<(), PlatformError> {
     AppLauncher::with_window(window)
         .log_to_console()
         .launch(ViewModel {
+            padding: 24.0,
             game: Game::new(13),
             hover: None,
         })

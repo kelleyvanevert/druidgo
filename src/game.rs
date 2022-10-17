@@ -40,6 +40,12 @@ impl Pos {
     }
 }
 
+impl From<(usize, usize)> for Pos {
+    fn from((x, y): (usize, usize)) -> Self {
+        Self(x as i32, y as i32)
+    }
+}
+
 #[derive(Clone, PartialEq, Copy, Enum, Data)]
 pub enum Stone {
     White,
