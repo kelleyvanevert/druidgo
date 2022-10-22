@@ -4,16 +4,18 @@
 #[macro_use]
 extern crate enum_map;
 
+mod flexbox;
 mod game;
 
 use crate::game::{Game, Pos};
 use druid::kurbo::{Circle, Line};
 use druid::piet::{LineCap, LineJoin, StrokeStyle};
-use druid::widget::{CrossAxisAlignment, Flex, MainAxisAlignment};
+use druid::widget::Label;
 use druid::{
-    AppLauncher, Color, Data, Event, Lens, MouseButton, PlatformError, Point, RenderContext,
-    Widget, WidgetExt, WindowDesc,
+    AppLauncher, Color, Data, Event, Lens, MouseButton, PlatformError, Point, RenderContext, Size,
+    Widget, WindowDesc,
 };
+use flexbox::FlexBox;
 use game::Stone;
 
 #[derive(Clone, Data, Lens)]
@@ -24,30 +26,46 @@ struct ViewModel {
 }
 
 impl ViewModel {
-    fn project(&self, widget_size: f64, pos: Pos) -> Point {
+    fn project(&self, widget_size: Size, pos: Pos) -> Point {
+        let Size { width, height } = widget_size;
+        let (widget_size, px, py) = if width > height {
+            (height, (width - height) / 2.0, 0.0)
+        } else {
+            (width, 0.0, (height - width) / 2.0)
+        };
+
         let board_size = widget_size - 2.0 * self.padding;
         let stone_size = board_size / (self.game.size as f64);
+
         Point {
-            x: self.padding + (pos.0 as f64 + 0.5) * stone_size,
-            y: self.padding + (pos.1 as f64 + 0.5) * stone_size,
+            x: px + self.padding + (pos.0 as f64 + 0.5) * stone_size,
+            y: py + self.padding + (pos.1 as f64 + 0.5) * stone_size,
         }
     }
 
     #[allow(dead_code)]
-    fn valid_project(&self, widget_size: f64, pos: Pos) -> Option<Point> {
+    fn valid_project(&self, widget_size: Size, pos: Pos) -> Option<Point> {
         pos.and_valid(self.game.size)
             .map(|p| self.project(widget_size, p))
     }
 
-    fn unproject(&self, widget_size: f64, pt: Point) -> Pos {
+    fn unproject(&self, widget_size: Size, pt: Point) -> Pos {
+        let Size { width, height } = widget_size;
+        let (widget_size, px, py) = if width > height {
+            (height, (width - height) / 2.0, 0.0)
+        } else {
+            (width, 0.0, (height - width) / 2.0)
+        };
+
         let board_size = widget_size - 2.0 * self.padding;
+
         Pos(
-            ((pt.x - self.padding) / board_size * (self.game.size as f64)).floor() as i32,
-            ((pt.y - self.padding) / board_size * (self.game.size as f64)).floor() as i32,
+            ((pt.x - self.padding - px) / board_size * (self.game.size as f64)).floor() as i32,
+            ((pt.y - self.padding - py) / board_size * (self.game.size as f64)).floor() as i32,
         )
     }
 
-    fn unproject_valid(&self, widget_size: f64, pt: Point) -> Option<Pos> {
+    fn unproject_valid(&self, widget_size: Size, pt: Point) -> Option<Pos> {
         self.unproject(widget_size, pt).and_valid(self.game.size)
     }
 }
@@ -70,12 +88,12 @@ impl Widget<ViewModel> for GoBoardWidget {
     ) {
         match event {
             Event::MouseMove(e) => {
-                model.hover = model.unproject_valid(ctx.size().width, e.pos);
+                model.hover = model.unproject_valid(ctx.size(), e.pos);
                 ctx.request_paint();
             }
             Event::MouseDown(e) => {
                 if e.button == MouseButton::Left {
-                    if let Some(pos) = model.unproject_valid(ctx.size().width, e.pos) {
+                    if let Some(pos) = model.unproject_valid(ctx.size(), e.pos) {
                         model.game.try_place_stone(pos);
                         ctx.request_paint();
                     }
@@ -110,13 +128,14 @@ impl Widget<ViewModel> for GoBoardWidget {
         _model: &ViewModel,
         _env: &druid::Env,
     ) -> druid::Size {
-        bc.constrain_aspect_ratio(1., f64::INFINITY)
+        bc.max()
     }
 
     fn paint(&mut self, ctx: &mut druid::PaintCtx, model: &ViewModel, _env: &druid::Env) {
         let ViewModel { game, .. } = model;
-        let widget_size = ctx.size().width;
-        let board_size = widget_size - 2.0 * model.padding;
+
+        let widget_size = ctx.size();
+        let board_size = widget_size.min_side() - 2.0 * model.padding;
         let stone_size = board_size / (game.size as f64);
         let line_stroke_style = StrokeStyle::new()
             .line_cap(LineCap::Round)
@@ -198,18 +217,56 @@ impl Widget<ViewModel> for GoBoardWidget {
     }
 }
 
-fn build_calc() -> impl Widget<ViewModel> {
+fn build_flex_ui() -> impl Widget<ViewModel> {
     let board = GoBoardWidget::new();
 
-    Flex::column()
-        .with_flex_child(board, 1.)
-        .cross_axis_alignment(CrossAxisAlignment::Center)
-        .main_axis_alignment(MainAxisAlignment::Center)
-        .background(Color::WHITE)
+    FlexBox::new()
+        .debug_label("parent")
+        .background(&Color::WHITE)
+        .with_child(
+            FlexBox::new()
+                .debug_label("sidebar")
+                .basis(300.0)
+                .padding(12.0)
+                .with_child(
+                    FlexBox::new()
+                        .debug_label("sidebar_inner")
+                        .border(2.0)
+                        .padding(16.0)
+                        .grow(1.0)
+                        .content(
+                            Label::new(|data: &ViewModel, _env: &_| {
+                                format!(
+                                    "Captures:\n{} white\n{} black",
+                                    data.game.state.captures[Stone::White],
+                                    data.game.state.captures[Stone::Black]
+                                )
+                            })
+                            .with_text_size(24.0)
+                            .with_text_color(Color::BLACK),
+                        ),
+                ),
+        )
+        .with_child(
+            FlexBox::new()
+                .debug_label("board")
+                .grow(1.0)
+                .padding(12.0)
+                .content(board),
+        )
+
+    // .with_child(FlexBox::spacer(None).debug_label("B"))
+    // .with_child(
+    //     FlexBox::new()
+    //         .debug_label("C")
+    //         .background(&Color::BLUE)
+    //         .border(3.0)
+    //         .grow(2.0),
+    // )
 }
 
 pub fn main() -> Result<(), PlatformError> {
-    let window = WindowDesc::new(build_calc())
+    let window = WindowDesc::new(build_flex_ui())
         .window_size((800., 600.))
         .resizable(true)
         .title("Go");
@@ -217,7 +274,7 @@ pub fn main() -> Result<(), PlatformError> {
     AppLauncher::with_window(window)
         .log_to_console()
         .launch(ViewModel {
-            padding: 24.0,
+            padding: 8.0,
             game: Game::new(13),
             hover: None,
         })
