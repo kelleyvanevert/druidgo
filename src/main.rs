@@ -10,13 +10,13 @@ mod game;
 use crate::game::{Game, Pos};
 use druid::kurbo::{Circle, Line};
 use druid::piet::{LineCap, LineJoin, StrokeStyle};
-use druid::widget::Label;
+use druid::widget::{Label, LensWrap};
 use druid::{
-    AppLauncher, Color, Data, Event, Lens, MouseButton, PlatformError, Point, RenderContext, Size,
-    Widget, WindowDesc,
+    AppLauncher, Color, Data, Event, Lens, LensExt, MouseButton, PlatformError, Point,
+    RenderContext, Size, Widget, WindowDesc,
 };
 use flexbox::FlexBox;
-use game::Stone;
+use game::{GameState, Stone};
 
 #[derive(Clone, Data, Lens)]
 struct ViewModel {
@@ -234,17 +234,18 @@ fn build_flex_ui() -> impl Widget<ViewModel> {
                         .border(2.0)
                         .padding(16.0)
                         .grow(1.0)
-                        .content(
-                            Label::new(|data: &ViewModel, _env: &_| {
+                        .content(LensWrap::new(
+                            Label::new(|state: &GameState, _env: &_| {
                                 format!(
                                     "Captures:\n{} white\n{} black",
-                                    data.game.state.captures[Stone::White],
-                                    data.game.state.captures[Stone::Black]
+                                    state.captures[Stone::White],
+                                    state.captures[Stone::Black]
                                 )
                             })
                             .with_text_size(24.0)
                             .with_text_color(Color::BLACK),
-                        ),
+                            ViewModel::game.then(Game::state),
+                        )),
                 ),
         )
         .with_child(
