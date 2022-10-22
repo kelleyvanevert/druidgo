@@ -2,7 +2,7 @@ use druid::{Data, Lens};
 use enum_map::{Enum, EnumMap};
 use std::ops::Neg;
 
-#[derive(Clone, Debug, Data, Copy, PartialEq)]
+#[derive(Clone, Debug, Data, Copy, PartialEq, Eq)]
 pub struct Pos(pub i32, pub i32);
 
 impl Pos {
@@ -106,26 +106,29 @@ impl Game {
 
     /// Checks whether the structure around position `p` is surrounded, and if so, returns the the whole structure.
     pub fn is_surrounded(&self, p: Pos) -> Option<(Stone, Vec<Pos>)> {
-        let mut found: Vec<Pos> = vec![];
+        let mut structure: Vec<Pos> = vec![];
 
         if let Some(color) = self.stone_at(p) {
             let mut todo: Vec<Pos> = vec![p];
 
             while let Some(p) = todo.pop() {
-                found.push(p);
+                structure.push(p);
 
                 for np in p.neighbors(self.size) {
                     if !self.has_stone_at(np) {
                         return None;
                     } else if let Some(neighbor_color) = self.stone_at(np) {
-                        if neighbor_color == color && !found.contains(&np) {
+                        if neighbor_color == color
+                            && !structure.contains(&np)
+                            && !todo.contains(&np)
+                        {
                             todo.push(np);
                         }
                     }
                 }
             }
 
-            return Some((color, found));
+            return Some((color, structure));
         }
 
         // should not happen
